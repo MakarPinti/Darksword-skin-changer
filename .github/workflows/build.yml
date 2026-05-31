@@ -1,0 +1,67 @@
+name: Build DarkSword IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (optional, e.g. 1.0.1)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Theos
+        uses: theos/theos-action@v1
+        with:
+          theos-sdks-path: ./sdks
+
+      - name: Build .deb
+        run: |
+          make package FINALPACKAGE=1
+        env:
+          THEOS: ${{ env.THEOS }}
+
+      - name: Convert .deb to .ipa
+        run: |
+          DEB=$(find packages -name "*.deb" | sort | tail -1)
+          echo "Found deb: $DEB"
+
+          TMPDIR=$(mktemp -d)
+          cd "$TMPDIR"
+          ar x "$OLDPWD/$DEB"
+
+          DATA=$(ls data.tar.* 2>/dev/null | head -1)
+          echo "Data archive: $DATA"
+
+          case "$DATA" in
+            *.gz)  tar xzf "$DATA" ;;
+            *.xz)  tar xJf "$DATA" ;;
+            *.bz2) tar xjf "$DATA" ;;
+            *)     tar xf "$DATA"  ;;
+          esac
+
+          APP=$(find . -name "*.app" -maxdepth 8 | head -1)
+          echo "App bundle: $APP"
+
+          mkdir -p Payload
+          cp -r "$APP" Payload/
+          zip -qr DarkSword.ipa Payload/
+
+          mv DarkSword.ipa "$OLDPWD/DarkSword.ipa"
+          cd "$OLDPWD"
+          rm -rf "$TMPDIR"
+
+          echo "IPA size: $(du -sh DarkSword.ipa)"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSword-${{ github.run_number }}
+          path: DarkSword.ipa
+          retention-days: 30
