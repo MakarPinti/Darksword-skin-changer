@@ -1,0 +1,9 @@
+Package: com.example.antidarksword
+Name: AntiDarkSword
+Version: 0.1.0
+Architecture: iphoneos-arm
+Description: Safe defensive UI mockup for AntiDarkSword.
+Maintainer: You
+Author: You
+Section: Utilities
+Depends: firmware (>= 15.0)
