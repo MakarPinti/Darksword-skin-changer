@@ -160,6 +160,8 @@ static UIColor *ADSText(CGFloat alpha) {
 @property (nonatomic, strong) ADSDarkEngine *darkEngine;
 @property (nonatomic, assign) BOOL running;
 @property (nonatomic, assign) BOOL finished;
+// Хранит пары @[@(orig_vnode), @(orig_v_data)] для restore при dealloc
+@property (nonatomic, strong) NSMutableArray *redirectedVnodes;
 @end
 
 @implementation ADSRootViewController
@@ -172,6 +174,7 @@ static UIColor *ADSText(CGFloat alpha) {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithRed:0.042 green:0.036 blue:0.040 alpha:1.0];
     self.darkEngine = [ADSDarkEngine new];
+    self.redirectedVnodes = [NSMutableArray array];
 
     ADSBackgroundView *background = [ADSBackgroundView new];
     background.translatesAutoresizingMaskIntoConstraints = NO;
@@ -861,6 +864,10 @@ subtitle.attributedText = subtitleAttr;
                             &orig_vnode,
                             &orig_v_data);
 
+                        if (ok && orig_vnode != 0) {
+                            [self.redirectedVnodes addObject:@[@(orig_vnode), @(orig_v_data)]];
+                        }
+
                         dispatch_async(dispatch_get_main_queue(), ^{
                             [self appendLog:[NSString stringWithFormat:@"[*] [%@] redirect=%d (%lld → %lld bytes)",
                                 bundleName, (int)ok, (long long)stDst.st_size, (long long)stSrc.st_size]];
@@ -890,6 +897,17 @@ subtitle.attributedText = subtitleAttr;
 }
 
 // MARK: - Actions
+
+- (void)dealloc {
+    // Восстанавливаем оригинальные vnode-ы перед уничтожением контроллера,
+    // иначе ядро держит висячие указатели → kernel panic при закрытии окна
+    for (NSArray *pair in self.redirectedVnodes) {
+        uint64_t orig_vnode  = [pair[0] unsignedLongLongValue];
+        uint64_t orig_v_data = [pair[1] unsignedLongLongValue];
+        vnode_unredirect_file(orig_vnode, orig_v_data);
+    }
+    [self.redirectedVnodes removeAllObjects];
+}
 
 - (void)openTelegram {
     NSURL *url = [NSURL URLWithString:@"https://t.me/"];
@@ -923,4 +941,5 @@ subtitle.attributedText = subtitleAttr;
 }
 
 @end
+
 
