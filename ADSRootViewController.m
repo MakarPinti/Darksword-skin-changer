@@ -800,29 +800,57 @@ subtitle.attributedText = subtitleAttr;
 
                 if (!destPath.length) {
                     [self appendLog:@"[-] foundGamePath пуст — некуда подменять"];
-                } else {
-                    for (NSString *bundleName in bundleDestRel) {
-                        NSString *srcPath = [[NSBundle mainBundle] pathForResource:bundleName ofType:@"bundle"];
-                        NSString *destRel = bundleDestRel[bundleName];
-                        NSString *destPath2real = [destPath stringByAppendingPathComponent:destRel];
-                        NSString *destPath2;
-                        if ([destPath2real hasPrefix:@"/private/"]) {
-                            destPath2 = destPath2real;
-                        } else {
-                            destPath2 = [destPath2real stringByReplacingOccurrencesOfString:@"/var/containers"
-                                                                                 withString:@"/private/var/containers"];
-                        }
+                    [self setHeadline:@"Complete" animated:YES];
+                    [self updateStatusDotForState:@"done"];
+                    self.running = NO;
+                    self.finished = YES;
+                    [self setRunButtonDisabledLookWithTitle:@"Done ✓"];
+                    return;
+                }
 
-                        if (!srcPath.length) {
-                            [self appendLog:[NSString stringWithFormat:@"[-] [%@] нет в AntiDarkSword.app/Bundle", bundleName]];
-                            continue;
-                        }
+                // Собираем задачи заранее на главном потоке
+                NSMutableArray *tasks = [NSMutableArray array];
+                for (NSString *bundleName in bundleDestRel) {
+                    NSString *srcPath = [[NSBundle mainBundle] pathForResource:bundleName ofType:@"bundle"];
+                    NSString *destRel = bundleDestRel[bundleName];
+                    NSString *destPath2real = [destPath stringByAppendingPathComponent:destRel];
+                    NSString *destPath2;
+                    if ([destPath2real hasPrefix:@"/private/"]) {
+                        destPath2 = destPath2real;
+                    } else {
+                        destPath2 = [destPath2real stringByReplacingOccurrencesOfString:@"/var/containers"
+                                                                             withString:@"/private/var/containers"];
+                    }
+
+                    if (!srcPath.length) {
+                        [self appendLog:[NSString stringWithFormat:@"[-] [%@] нет в AntiDarkSword.app/Bundle", bundleName]];
+                        continue;
+                    }
+
+                    [tasks addObject:@{ @"name": bundleName, @"src": srcPath, @"dst": destPath2 }];
+                }
+
+                // vnode_redirect_file — на фоновом потоке, вне main thread
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    for (NSDictionary *task in tasks) {
+                        NSString *bundleName = task[@"name"];
+                        NSString *srcPath    = task[@"src"];
+                        NSString *destPath2  = task[@"dst"];
 
                         struct stat stSrc = {0}, stDst = {0};
-                        int srcOk = (stat([srcPath UTF8String], &stSrc) == 0);
+                        int srcOk = (stat([srcPath UTF8String],   &stSrc) == 0);
                         int dstOk = (stat([destPath2 UTF8String], &stDst) == 0);
+
                         if (!dstOk) {
-                            [self appendLog:[NSString stringWithFormat:@"[-] [%@] нет в игре: %@", bundleName, destPath2]];
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                [self appendLog:[NSString stringWithFormat:@"[-] [%@] нет в игре: %@", bundleName, destPath2]];
+                            });
+                            continue;
+                        }
+                        if (!srcOk) {
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                [self appendLog:[NSString stringWithFormat:@"[-] [%@] src недоступен: %@", bundleName, srcPath]];
+                            });
                             continue;
                         }
 
@@ -832,23 +860,31 @@ subtitle.attributedText = subtitleAttr;
                             [srcPath UTF8String],
                             &orig_vnode,
                             &orig_v_data);
-                        [self appendLog:[NSString stringWithFormat:@"[*] [%@] redirect=%d (%lld → %lld bytes)",
-                            bundleName, (int)ok, (long long)stDst.st_size, (long long)stSrc.st_size]];
-                        [self appendLog:ok ? [NSString stringWithFormat:@"[+] [%@] OK", bundleName]
-                                        : [NSString stringWithFormat:@"[-] [%@] failed", bundleName]];
-                    }
-                }
 
-                [self setHeadline:@"Complete" animated:YES];
-                [self updateStatusDotForState:@"done"];
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [self appendLog:[NSString stringWithFormat:@"[*] [%@] redirect=%d (%lld → %lld bytes)",
+                                bundleName, (int)ok, (long long)stDst.st_size, (long long)stSrc.st_size]];
+                            [self appendLog:ok ? [NSString stringWithFormat:@"[+] [%@] OK", bundleName]
+                                            : [NSString stringWithFormat:@"[-] [%@] failed", bundleName]];
+                        });
+                    }
+
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [self setHeadline:@"Complete" animated:YES];
+                        [self updateStatusDotForState:@"done"];
+                        self.running = NO;
+                        self.finished = YES;
+                        [self setRunButtonDisabledLookWithTitle:@"Done ✓"];
+                    });
+                });
             } else {
                 [self appendLog:@"[-] Exploit failed"];
                 [self setHeadline:@"Failed" animated:YES];
                 [self updateStatusDotForState:@"failed"];
+                self.running = NO;
+                self.finished = YES;
+                [self setRunButtonDisabledLookWithTitle:@"Failed"];
             }
-            self.running = NO;
-            self.finished = YES;
-            [self setRunButtonDisabledLookWithTitle:success ? @"Done ✓" : @"Failed"];
         });
     });
 }
@@ -887,3 +923,4 @@ subtitle.attributedText = subtitleAttr;
 }
 
 @end
+
