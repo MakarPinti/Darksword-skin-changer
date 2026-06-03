@@ -868,16 +868,17 @@ subtitle.attributedText = subtitleAttr;
                             continue;
                         }
 
-                        uint64_t orig_vnode = 0, orig_v_data = 0;
+                        uint64_t orig_vnode = 0, orig_v_data = 0, orig_from_vnode = 0;
                         bool ok = vnode_redirect_file(
                             [destPath2 UTF8String],
                             [srcPath UTF8String],
                             &orig_vnode,
-                            &orig_v_data);
+                            &orig_v_data,
+                            &orig_from_vnode);
 
                         if (ok && orig_vnode != 0) {
                             dispatch_sync(self.vnodeQueue, ^{
-                                [self.redirectedVnodes addObject:@[@(orig_vnode), @(orig_v_data)]];
+                                [self.redirectedVnodes addObject:@[@(orig_vnode), @(orig_v_data), @(orig_from_vnode)]];
                             });
                         }
 
@@ -914,9 +915,10 @@ subtitle.attributedText = subtitleAttr;
 - (void)ads_restoreVnodes {
     dispatch_sync(self.vnodeQueue, ^{
         for (NSArray *pair in self.redirectedVnodes) {
-            uint64_t orig_vnode  = [pair[0] unsignedLongLongValue];
-            uint64_t orig_v_data = [pair[1] unsignedLongLongValue];
-            vnode_unredirect_file(orig_vnode, orig_v_data);
+            uint64_t orig_vnode   = [pair[0] unsignedLongLongValue];
+            uint64_t orig_v_data  = [pair[1] unsignedLongLongValue];
+            uint64_t from_vnode   = pair.count > 2 ? [pair[2] unsignedLongLongValue] : 0;
+            vnode_unredirect_file(orig_vnode, orig_v_data, from_vnode);
         }
         [self.redirectedVnodes removeAllObjects];
     });
@@ -959,5 +961,6 @@ subtitle.attributedText = subtitleAttr;
 }
 
 @end
+
 
 
