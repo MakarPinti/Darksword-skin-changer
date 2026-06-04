@@ -772,6 +772,22 @@ subtitle.attributedText = subtitleAttr;
                 [self appendLog:[NSString stringWithFormat:@"[*] self_proc: 0x%llx", self_proc]];
             });
 
+            // proc_find returns (uint64_t)-1 on failure.
+            // sandbox_escape only checks !self_proc (zero), so -1 slips through
+            // and causes a kernel read at 0xFFFFFFFFFFFFFFFF+offset -> kernel panic.
+            if (self_proc == 0 || self_proc == (uint64_t)-1) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self appendLog:@"[-] proc_find failed — cannot continue"];
+                    [self appendLog:@"[-] Exploit failed"];
+                    [self setHeadline:@"Failed" animated:YES];
+                    [self updateStatusDotForState:@"failed"];
+                    self.running = NO;
+                    self.finished = YES;
+                    [self setRunButtonDisabledLookWithTitle:@"Failed"];
+                });
+                return;
+            }
+
             int sbx_ret = sandbox_escape(self_proc);
             dispatch_async(dispatch_get_main_queue(), ^{
                 [self appendLog:[NSString stringWithFormat:@"[*] sandbox_escape ret: %d", sbx_ret]];
