@@ -272,11 +272,27 @@ int sandbox_elevate_to_root(uint64_t self_proc) {
     }
     NSLog(@"[SBX] elevate: ourproc: 0x%llx", self_proc);
 
-    uint64_t ourucredraw = early_kread64(self_proc + 0x10);
-    uint64_t ourucred = S(ourucredraw);
-    NSLog(@"[SBX] elevate: ourucred: 0x%llx", ourucred);
+    // Find our proc_ro and the actual ucred slot offset inside it.
+    // Previously this wrote to self_proc+0x10, which is NOT the ucred field —
+    // it's a random proc struct member between p_list.le_prev and p_proc_ro.
+    // Corrupting that field makes the kernel panic when it walks the proc list
+    // on app exit (e.g. via app switcher).
+    uint64_t self_proc_ro = S(early_kread64(self_proc + OFF_PROC_PROC_RO));
+    if (!K(self_proc_ro)) {
+        NSLog(@"[SBX] elevate: failed to read our proc_ro");
+        return -1;
+    }
 
-    early_kwrite64(self_proc + 0x10, launchducred);
+    uint64_t ourucred = 0;
+    uint32_t ucred_off = 0;
+    if (sbx_find_ucred_slot(self_proc, &ourucred, &ucred_off) != 0) {
+        NSLog(@"[SBX] elevate: could not locate our ucred slot in proc_ro");
+        return -1;
+    }
+    NSLog(@"[SBX] elevate: ourucred=0x%llx at proc_ro+0x%x", ourucred, ucred_off);
+
+    // Write launchd's ucred into our proc_ro at the discovered slot.
+    early_kwrite64(self_proc_ro + ucred_off, launchducred);
 
     if (getuid() == 0) {
         NSLog(@"[SBX] elevate success!");
