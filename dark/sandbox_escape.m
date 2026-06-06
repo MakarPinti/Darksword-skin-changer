@@ -270,7 +270,7 @@ static uint64_t sbx_ucredbyproc_nosandbox(uint64_t proc) {
 }
 
 // UI log callback — set from ADSRootViewController before calling elevate
-void (*sbx_ui_log)(NSString *) = NULL;
+void (^sbx_ui_log)(NSString *) = NULL;
 #define ELOG(fmt, ...) do {     NSString *_s = [NSString stringWithFormat:@"[elv] " fmt, ##__VA_ARGS__];     NSLog(@"%@", _s);     if (sbx_ui_log) dispatch_async(dispatch_get_main_queue(), ^{ sbx_ui_log(_s); }); } while(0)
 
 int sandbox_elevate_to_root(uint64_t self_proc) {
