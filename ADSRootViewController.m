@@ -947,7 +947,20 @@ subtitle.attributedText = subtitleAttr;
     // в окно между концом restore и removeObserver, вызвав повторный
     // restore на частично разрушенном объекте.
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [self ads_restoreVnodes];
+
+    // dispatch_sync(vnodeQueue) в dealloc вызывает дедлок если dealloc
+    // произошёл изнутри vnodeQueue (финальный dispatch_async на main
+    // освободил последний strong ref). Watchdog убивает процесс → kernel panic.
+    // Решение: restore выполняется напрямую, без dispatch_sync.
+    // К этому моменту vnodeQueue уже завершил работу (finished=YES
+    // гарантирует отсутствие новых задач), поэтому прямой вызов безопасен.
+    for (NSArray *pair in self.redirectedVnodes) {
+        uint64_t orig_vnode  = [pair[0] unsignedLongLongValue];
+        uint64_t orig_v_data = [pair[1] unsignedLongLongValue];
+        uint64_t from_vnode  = pair.count > 2 ? [pair[2] unsignedLongLongValue] : 0;
+        vnode_unredirect_file(orig_vnode, orig_v_data, from_vnode);
+    }
+    [self.redirectedVnodes removeAllObjects];
 }
 
 - (void)openTelegram {
